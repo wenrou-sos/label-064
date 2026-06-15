@@ -5,7 +5,9 @@ const pool = require('../config/db');
 // 获取检测列表
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, pageSize = 10, keyword = '', overall_result = '', blood_type = '' } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const { keyword = '', overall_result = '', blood_type = '' } = req.query;
     const offset = (page - 1) * pageSize;
     
     let sql = `SELECT bt.*, bu.donor_name, bu.component_type, bu.collection_date 
@@ -37,10 +39,10 @@ router.get('/', async (req, res) => {
     }
     
     sql += ' ORDER BY bt.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), parseInt(offset));
+    params.push(pageSize, offset);
     
-    const [rows] = await pool.execute(sql, params);
-    const [countResult] = await pool.execute(countSql, countParams);
+    const [rows] = await pool.query(sql, params);
+    const [countResult] = await pool.query(countSql, countParams);
     
     res.json({
       code: 200,
@@ -61,7 +63,7 @@ router.get('/', async (req, res) => {
 // 获取待检测的血液列表
 router.get('/pending/list', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await pool.query(
       `SELECT * FROM blood_units WHERE status IN ('待检测', '检测中') ORDER BY created_at ASC`
     );
     res.json({ code: 200, message: '获取成功', data: rows });
@@ -75,7 +77,7 @@ router.get('/pending/list', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute(`
+    const [rows] = await pool.query(`
       SELECT bt.*, bu.donor_name, bu.component_type, bu.volume, bu.collection_date, bu.collection_site
       FROM blood_tests bt 
       LEFT JOIN blood_units bu ON bt.blood_unit_id = bu.id 
@@ -109,7 +111,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少必要参数' });
     }
     
-    const [existing] = await connection.execute('SELECT id, status FROM blood_units WHERE id = ?', [blood_unit_id]);
+    const [existing] = await connection.query('SELECT id, status FROM blood_units WHERE id = ?', [blood_unit_id]);
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '血液记录不存在' });
     }
@@ -119,13 +121,13 @@ router.post('/', async (req, res) => {
        alt_level, alt_result, hbsag, hcv, hiv, syphilis, overall_result, test_items, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     
-    const [result] = await connection.execute(insertSql, [
+    const [result] = await connection.query(insertSql, [
       blood_unit_id, blood_no, test_date, tester, blood_type, rh_factor,
       alt_level, alt_result, hbsag, hcv, hiv, syphilis, overall_result, test_items, remark
     ]);
     
     const bloodStatus = overall_result === '合格' ? '合格' : '不合格';
-    await connection.execute(
+    await connection.query(
       'UPDATE blood_units SET status = ?, blood_type = ?, rh_factor = ? WHERE id = ?',
       [bloodStatus, blood_type, rh_factor, blood_unit_id]
     );
@@ -134,7 +136,7 @@ router.post('/', async (req, res) => {
     const trackingSql = `INSERT INTO blood_tracking 
       (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
       VALUES (?, ?, ?, '检验科', ?, NOW(), ?)`;
-    await connection.execute(trackingSql, [
+    await connection.query(trackingSql, [
       blood_unit_id, blood_no, trackingStatus, tester, 
       overall_result === '合格' ? '所有检测项目合格' : '检测不合格'
     ]);
@@ -142,9 +144,9 @@ router.post('/', async (req, res) => {
     if (overall_result === '不合格') {
       const discardNo = 'DS' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + 
                         String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-      const [bloodUnit] = await connection.execute('SELECT * FROM blood_units WHERE id = ?', [blood_unit_id]);
+      const [bloodUnit] = await connection.query('SELECT * FROM blood_units WHERE id = ?', [blood_unit_id]);
       if (bloodUnit.length > 0) {
-        await connection.execute(`INSERT INTO blood_discards 
+        await connection.query(`INSERT INTO blood_discards 
           (discard_no, blood_unit_id, blood_no, blood_type, component_type, volume, 
            discard_reason, discard_date, operator, remark)
           VALUES (?, ?, ?, ?, ?, ?, '检测不合格', ?, ?, ?)`,
@@ -176,7 +178,7 @@ router.put('/:id', async (req, res) => {
       overall_result, test_items, remark
     } = req.body;
     
-    const [existing] = await pool.execute('SELECT * FROM blood_tests WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT * FROM blood_tests WHERE id = ?', [id]);
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '检测记录不存在' });
     }
@@ -187,7 +189,7 @@ router.put('/:id', async (req, res) => {
       overall_result = ?, test_items = ?, remark = ?
       WHERE id = ?`;
     
-    await pool.execute(sql, [
+    await pool.query(sql, [
       test_date, tester, blood_type, rh_factor,
       alt_level, alt_result, hbsag, hcv, hiv, syphilis,
       overall_result, test_items, remark, id

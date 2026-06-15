@@ -5,7 +5,9 @@ const pool = require('../config/db');
 // 获取献血者列表（支持分页和搜索）
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, pageSize = 10, keyword = '', blood_type = '', status = '' } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const { keyword = '', blood_type = '', status = '' } = req.query;
     const offset = (page - 1) * pageSize;
     
     let sql = 'SELECT * FROM donors WHERE 1=1';
@@ -36,10 +38,10 @@ router.get('/', async (req, res) => {
     }
     
     sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), parseInt(offset));
+    params.push(pageSize, offset);
     
-    const [rows] = await pool.execute(sql, params);
-    const [countResult] = await pool.execute(countSql, countParams);
+    const [rows] = await pool.query(sql, params);
+    const [countResult] = await pool.query(countSql, countParams);
     
     res.json({
       code: 200,
@@ -61,7 +63,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute('SELECT * FROM donors WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT * FROM donors WHERE id = ?', [id]);
     
     if (rows.length === 0) {
       return res.status(404).json({ code: 404, message: '献血者不存在' });
@@ -83,14 +85,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少必要参数' });
     }
     
-    const [existing] = await pool.execute('SELECT id FROM donors WHERE donor_no = ? OR id_card = ?', [donor_no, id_card]);
+    const [existing] = await pool.query('SELECT id FROM donors WHERE donor_no = ? OR id_card = ?', [donor_no, id_card]);
     if (existing.length > 0) {
       return res.status(400).json({ code: 400, message: '献血者编号或身份证号已存在' });
     }
     
     const sql = `INSERT INTO donors (donor_no, name, gender, age, id_card, phone, blood_type, rh_factor, address, remark) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    const [result] = await pool.execute(sql, [donor_no, name, gender, age, id_card, phone, blood_type || '未知', rh_factor || '未知', address, remark]);
+    const [result] = await pool.query(sql, [donor_no, name, gender, age, id_card, phone, blood_type || '未知', rh_factor || '未知', address, remark]);
     
     res.json({ code: 200, message: '添加成功', data: { id: result.insertId } });
   } catch (error) {
@@ -105,14 +107,14 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const { name, gender, age, phone, blood_type, rh_factor, address, status, remark } = req.body;
     
-    const [existing] = await pool.execute('SELECT id FROM donors WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT id FROM donors WHERE id = ?', [id]);
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '献血者不存在' });
     }
     
     const sql = `UPDATE donors SET name = ?, gender = ?, age = ?, phone = ?, blood_type = ?, rh_factor = ?, address = ?, status = ?, remark = ? 
                  WHERE id = ?`;
-    await pool.execute(sql, [name, gender, age, phone, blood_type, rh_factor, address, status, remark, id]);
+    await pool.query(sql, [name, gender, age, phone, blood_type, rh_factor, address, status, remark, id]);
     
     res.json({ code: 200, message: '更新成功' });
   } catch (error) {
@@ -126,12 +128,12 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    const [bloodUnits] = await pool.execute('SELECT id FROM blood_units WHERE donor_id = ?', [id]);
+    const [bloodUnits] = await pool.query('SELECT id FROM blood_units WHERE donor_id = ?', [id]);
     if (bloodUnits.length > 0) {
       return res.status(400).json({ code: 400, message: '该献血者有献血记录，无法删除' });
     }
     
-    await pool.execute('DELETE FROM donors WHERE id = ?', [id]);
+    await pool.query('DELETE FROM donors WHERE id = ?', [id]);
     res.json({ code: 200, message: '删除成功' });
   } catch (error) {
     console.error('删除献血者失败:', error);
@@ -143,7 +145,7 @@ router.delete('/:id', async (req, res) => {
 router.get('/:id/donations', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute('SELECT * FROM blood_units WHERE donor_id = ? ORDER BY collection_date DESC', [id]);
+    const [rows] = await pool.query('SELECT * FROM blood_units WHERE donor_id = ? ORDER BY collection_date DESC', [id]);
     res.json({ code: 200, message: '获取成功', data: rows });
   } catch (error) {
     console.error('获取献血历史失败:', error);

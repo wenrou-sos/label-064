@@ -5,7 +5,9 @@ const pool = require('../config/db');
 // 获取血液单位列表
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, pageSize = 10, keyword = '', blood_type = '', component_type = '', status = '' } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const { keyword = '', blood_type = '', component_type = '', status = '' } = req.query;
     const offset = (page - 1) * pageSize;
     
     let sql = 'SELECT * FROM blood_units WHERE 1=1';
@@ -43,10 +45,10 @@ router.get('/', async (req, res) => {
     }
     
     sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), parseInt(offset));
+    params.push(pageSize, offset);
     
-    const [rows] = await pool.execute(sql, params);
-    const [countResult] = await pool.execute(countSql, countParams);
+    const [rows] = await pool.query(sql, params);
+    const [countResult] = await pool.query(countSql, countParams);
     
     res.json({
       code: 200,
@@ -68,7 +70,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute('SELECT * FROM blood_units WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT * FROM blood_units WHERE id = ?', [id]);
     
     if (rows.length === 0) {
       return res.status(404).json({ code: 404, message: '血液记录不存在' });
@@ -105,7 +107,7 @@ router.post('/', async (req, res) => {
        volume, blood_type, rh_factor, component_type, status, collector, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待检测', ?, ?)`;
     
-    const [result] = await connection.execute(insertSql, [
+    const [result] = await connection.query(insertSql, [
       blood_no, donor_id, donor_no, donor_name, collection_site, 
       collection_date, collection_time, volume, 
       blood_type || '未知', rh_factor || '未知', component_type || '全血', 
@@ -116,16 +118,16 @@ router.post('/', async (req, res) => {
       (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
       VALUES (?, ?, '已采集', ?, ?, ?, ?)`;
     
-    await connection.execute(trackingSql, [
+    await connection.query(trackingSql, [
       result.insertId, blood_no, collection_site, collector, 
       `${collection_date} ${collection_time}`, '血液采集完成'
     ]);
     
-    const [donorResult] = await connection.execute('SELECT donate_count, total_donate_volume FROM donors WHERE id = ?', [donor_id]);
+    const [donorResult] = await connection.query('SELECT donate_count, total_donate_volume FROM donors WHERE id = ?', [donor_id]);
     if (donorResult.length > 0) {
       const newCount = donorResult[0].donate_count + 1;
       const newVolume = donorResult[0].total_donate_volume + parseInt(volume);
-      await connection.execute(
+      await connection.query(
         'UPDATE donors SET donate_count = ?, total_donate_volume = ?, last_donate_date = ? WHERE id = ?',
         [newCount, newVolume, collection_date, donor_id]
       );
@@ -148,14 +150,14 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const { collection_site, collection_date, collection_time, volume, component_type, remark } = req.body;
     
-    const [existing] = await pool.execute('SELECT id FROM blood_units WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT id FROM blood_units WHERE id = ?', [id]);
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '血液记录不存在' });
     }
     
     const sql = `UPDATE blood_units SET collection_site = ?, collection_date = ?, collection_time = ?, 
                  volume = ?, component_type = ?, remark = ? WHERE id = ?`;
-    await pool.execute(sql, [collection_site, collection_date, collection_time, volume, component_type, remark, id]);
+    await pool.query(sql, [collection_site, collection_date, collection_time, volume, component_type, remark, id]);
     
     res.json({ code: 200, message: '更新成功' });
   } catch (error) {
@@ -173,7 +175,7 @@ router.get('/search/donor', async (req, res) => {
     }
     
     const searchKeyword = `%${keyword}%`;
-    const [rows] = await pool.execute(
+    const [rows] = await pool.query(
       'SELECT id, donor_no, name, gender, age, blood_type, rh_factor, phone, status FROM donors WHERE donor_no LIKE ? OR name LIKE ? OR id_card LIKE ? LIMIT 10',
       [searchKeyword, searchKeyword, searchKeyword]
     );

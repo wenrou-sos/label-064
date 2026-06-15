@@ -13,9 +13,10 @@ const SHELF_LIFE = {
 // 获取库存列表
 router.get('/', async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
     const { 
-      page = 1, pageSize = 10, keyword = '', 
-      blood_type = '', component_type = '', 
+      keyword = '', blood_type = '', component_type = '', 
       status = '', expire_warning = '' 
     } = req.query;
     const offset = (page - 1) * pageSize;
@@ -63,10 +64,10 @@ router.get('/', async (req, res) => {
     }
     
     sql += ' ORDER BY expire_date ASC, created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), parseInt(offset));
+    params.push(pageSize, offset);
     
-    const [rows] = await pool.execute(sql, params);
-    const [countResult] = await pool.execute(countSql, countParams);
+    const [rows] = await pool.query(sql, params);
+    const [countResult] = await pool.query(countSql, countParams);
     
     const dataWithDaysLeft = rows.map(item => {
       const today = new Date();
@@ -94,7 +95,7 @@ router.get('/', async (req, res) => {
 // 获取库存统计（按血型和成分分组）
 router.get('/stats/summary', async (req, res) => {
   try {
-    const [rows] = await pool.execute(`
+    const [rows] = await pool.query(`
       SELECT blood_type, component_type, 
              COUNT(*) as units, 
              SUM(volume) as total_volume
@@ -104,14 +105,14 @@ router.get('/stats/summary', async (req, res) => {
       ORDER BY blood_type, component_type
     `);
     
-    const [totalStats] = await pool.execute(`
+    const [totalStats] = await pool.query(`
       SELECT COUNT(*) as total_units, 
              SUM(volume) as total_volume
       FROM inventory 
       WHERE status = '在库'
     `);
     
-    const [expire7days] = await pool.execute(`
+    const [expire7days] = await pool.query(`
       SELECT COUNT(*) as count, SUM(volume) as volume
       FROM inventory 
       WHERE status = '在库' AND expire_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
@@ -135,8 +136,8 @@ router.get('/stats/summary', async (req, res) => {
 // 获取临期血液列表
 router.get('/expiring-soon', async (req, res) => {
   try {
-    const { days = 7 } = req.query;
-    const [rows] = await pool.execute(`
+    const days = parseInt(req.query.days) || 7;
+    const [rows] = await pool.query(`
       SELECT * FROM inventory 
       WHERE status = '在库' AND expire_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
       ORDER BY expire_date ASC
@@ -159,7 +160,7 @@ router.get('/expiring-soon', async (req, res) => {
 // 获取合格待入库的血液
 router.get('/pending-stock/list', async (req, res) => {
   try {
-    const [rows] = await pool.execute(`
+    const [rows] = await pool.query(`
       SELECT bu.* FROM blood_units bu
       LEFT JOIN inventory inv ON bu.id = inv.blood_unit_id
       WHERE bu.status = '合格' AND inv.id IS NULL
@@ -176,7 +177,7 @@ router.get('/pending-stock/list', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute('SELECT * FROM inventory WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT * FROM inventory WHERE id = ?', [id]);
     
     if (rows.length === 0) {
       return res.status(404).json({ code: 404, message: '库存记录不存在' });
@@ -209,7 +210,7 @@ router.post('/stock-in', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少必要参数' });
     }
     
-    const [bloodUnit] = await connection.execute(
+    const [bloodUnit] = await connection.query(
       'SELECT id, status FROM blood_units WHERE id = ?',
       [blood_unit_id]
     );
@@ -220,7 +221,7 @@ router.post('/stock-in', async (req, res) => {
       return res.status(400).json({ code: 400, message: '血液状态不是合格，无法入库' });
     }
     
-    const [existingInventory] = await connection.execute(
+    const [existingInventory] = await connection.query(
       'SELECT id FROM inventory WHERE blood_unit_id = ?',
       [blood_unit_id]
     );
@@ -239,14 +240,14 @@ router.post('/stock-in', async (req, res) => {
        shelf_life_days, status, temperature, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '在库', ?, ?)`;
     
-    const [result] = await connection.execute(insertSql, [
+    const [result] = await connection.query(insertSql, [
       blood_unit_id, blood_no, blood_type, rh_factor, component_type,
       volume, storage_location, storageDate.toISOString().split('T')[0], 
       expireDate.toISOString().split('T')[0],
       shelfLifeDays, temperature, remark
     ]);
     
-    await connection.execute(
+    await connection.query(
       "UPDATE blood_units SET status = '已入库' WHERE id = ?",
       [blood_unit_id]
     );
@@ -254,7 +255,7 @@ router.post('/stock-in', async (req, res) => {
     const trackingSql = `INSERT INTO blood_tracking 
       (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
       VALUES (?, ?, '已入库', ?, ?, NOW(), ?)`;
-    await connection.execute(trackingSql, [
+    await connection.query(trackingSql, [
       blood_unit_id, blood_no, storage_location || '血库', operator, '血液入库冷藏'
     ]);
     
@@ -281,7 +282,7 @@ router.post('/discard', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少必要参数' });
     }
     
-    const [inventory] = await connection.execute(
+    const [inventory] = await connection.query(
       'SELECT * FROM inventory WHERE id = ?',
       [inventory_id]
     );
@@ -299,18 +300,18 @@ router.post('/discard', async (req, res) => {
        volume, discard_reason, discard_date, operator, approver, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     
-    await connection.execute(insertSql, [
+    await connection.query(insertSql, [
       discardNo, inv.blood_unit_id, inv.blood_no, inv.blood_type, inv.component_type,
       inv.volume, discard_reason, discard_date || new Date().toISOString().split('T')[0], 
       operator, approver, remark
     ]);
     
-    await connection.execute(
+    await connection.query(
       "UPDATE inventory SET status = '已报废' WHERE id = ?",
       [inventory_id]
     );
     
-    await connection.execute(
+    await connection.query(
       "UPDATE blood_units SET status = '已报废' WHERE id = ?",
       [inv.blood_unit_id]
     );
@@ -318,7 +319,7 @@ router.post('/discard', async (req, res) => {
     const trackingSql = `INSERT INTO blood_tracking 
       (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
       VALUES (?, ?, '已报废', '血库', ?, NOW(), ?)`;
-    await connection.execute(trackingSql, [
+    await connection.query(trackingSql, [
       inv.blood_unit_id, inv.blood_no, operator, `报废原因：${discard_reason}`
     ]);
     

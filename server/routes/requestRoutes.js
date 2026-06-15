@@ -5,9 +5,10 @@ const pool = require('../config/db');
 // 获取用血申请列表
 router.get('/', async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
     const { 
-      page = 1, pageSize = 10, keyword = '', 
-      status = '', urgency = '', blood_type = '' 
+      keyword = '', status = '', urgency = '', blood_type = '' 
     } = req.query;
     const offset = (page - 1) * pageSize;
     
@@ -46,10 +47,10 @@ router.get('/', async (req, res) => {
     }
     
     sql += ' ORDER BY FIELD(urgency, "紧急", "加急", "常规"), created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), parseInt(offset));
+    params.push(pageSize, offset);
     
-    const [rows] = await pool.execute(sql, params);
-    const [countResult] = await pool.execute(countSql, countParams);
+    const [rows] = await pool.query(sql, params);
+    const [countResult] = await pool.query(countSql, countParams);
     
     res.json({
       code: 200,
@@ -71,13 +72,13 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.execute('SELECT * FROM blood_requests WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT * FROM blood_requests WHERE id = ?', [id]);
     
     if (rows.length === 0) {
       return res.status(404).json({ code: 404, message: '申请记录不存在' });
     }
     
-    const [issues] = await pool.execute(`
+    const [issues] = await pool.query(`
       SELECT bi.*, 
              (SELECT COUNT(*) FROM blood_issue_items bii WHERE bii.issue_id = bi.id) as item_count
       FROM blood_issues bi 
@@ -117,7 +118,7 @@ router.post('/', async (req, res) => {
        transfusion_reason, requester, request_date, status, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待审核', ?)`;
     
-    const [result] = await pool.execute(sql, [
+    const [result] = await pool.query(sql, [
       request_no, hospital_id, hospital_name, patient_name, patient_gender,
       patient_age, patient_blood_type, rh_factor || '阳性', component_type,
       request_volume, request_units || 1, urgency || '常规', clinical_diagnosis,
@@ -137,7 +138,7 @@ router.post('/:id/audit', async (req, res) => {
     const { id } = req.params;
     const { auditor, audit_remark, pass } = req.body;
     
-    const [existing] = await pool.execute('SELECT id, status FROM blood_requests WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT id, status FROM blood_requests WHERE id = ?', [id]);
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '申请记录不存在' });
     }
@@ -147,13 +148,13 @@ router.post('/:id/audit', async (req, res) => {
     }
     
     const newStatus = pass ? '已审核' : '已取消';
-    await pool.execute(
+    await pool.query(
       'UPDATE blood_requests SET status = ?, auditor = ?, audit_time = NOW(), audit_remark = ? WHERE id = ?',
       [newStatus, auditor, audit_remark, id]
     );
     
     if (pass) {
-      await pool.execute(
+      await pool.query(
         "UPDATE blood_requests SET status = '配血中' WHERE id = ?",
         [id]
       );
@@ -171,7 +172,7 @@ router.get('/:id/match-blood', async (req, res) => {
   try {
     const { id } = req.params;
     
-    const [request] = await pool.execute(
+    const [request] = await pool.query(
       'SELECT patient_blood_type, rh_factor, component_type, request_volume, request_units FROM blood_requests WHERE id = ?',
       [id]
     );
@@ -180,7 +181,8 @@ router.get('/:id/match-blood', async (req, res) => {
     }
     
     const req = request[0];
-    const [matched] = await pool.execute(`
+    const limit = parseInt(req.request_units) * 2;
+    const [matched] = await pool.query(`
       SELECT inv.* FROM inventory inv
       WHERE inv.blood_type = ? 
         AND inv.rh_factor = ? 
@@ -188,7 +190,7 @@ router.get('/:id/match-blood', async (req, res) => {
         AND inv.status = '在库'
       ORDER BY inv.expire_date ASC
       LIMIT ?
-    `, [req.patient_blood_type, req.rh_factor || '阳性', req.component_type, req.request_units * 2]);
+    `, [req.patient_blood_type, req.rh_factor || '阳性', req.component_type, limit]);
     
     const withDaysLeft = matched.map(item => {
       const today = new Date();
@@ -221,7 +223,7 @@ router.post('/:id/issue', async (req, res) => {
       return res.status(400).json({ code: 400, message: '请选择要发放的血液' });
     }
     
-    const [request] = await connection.execute(
+    const [request] = await connection.query(
       'SELECT * FROM blood_requests WHERE id = ?',
       [id]
     );
@@ -235,7 +237,7 @@ router.post('/:id/issue', async (req, res) => {
     }
     
     const placeholders = inventory_ids.map(() => '?').join(',');
-    const [inventoryItems] = await connection.execute(
+    const [inventoryItems] = await connection.query(
       `SELECT * FROM inventory WHERE id IN (${placeholders}) AND status = '在库'`,
       inventory_ids
     );
@@ -256,14 +258,14 @@ router.post('/:id/issue', async (req, res) => {
        total_volume, total_units, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '已发血')`;
     
-    const [issueResult] = await connection.execute(issueSql, [
+    const [issueResult] = await connection.query(issueSql, [
       issue_no, id, reqData.request_no, reqData.hospital_id, reqData.hospital_name,
       reqData.patient_name, issue_date || new Date().toISOString().slice(0, 10), 
       issuer, receiver, totalVolume, totalUnits
     ]);
     
     for (const item of inventoryItems) {
-      await connection.execute(
+      await connection.query(
         `INSERT INTO blood_issue_items 
           (issue_id, issue_no, inventory_id, blood_unit_id, blood_no, 
            blood_type, rh_factor, component_type, volume, expire_date)
@@ -274,24 +276,24 @@ router.post('/:id/issue', async (req, res) => {
         ]
       );
       
-      await connection.execute(
+      await connection.query(
         "UPDATE inventory SET status = '已出库' WHERE id = ?",
         [item.id]
       );
       
-      await connection.execute(
+      await connection.query(
         "UPDATE blood_units SET status = '已出库' WHERE id = ?",
         [item.blood_unit_id]
       );
       
-      await connection.execute(
+      await connection.query(
         `INSERT INTO blood_tracking 
           (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
          VALUES (?, ?, '已出库', '血库', ?, NOW(), ?)`,
         [item.blood_unit_id, item.blood_no, issuer, `发往${reqData.hospital_name}`]
       );
       
-      await connection.execute(
+      await connection.query(
         `INSERT INTO blood_tracking 
           (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
          VALUES (?, ?, '已发往医院', ?, ?, NOW(), ?)`,
@@ -308,7 +310,7 @@ router.post('/:id/issue', async (req, res) => {
       newStatus = '部分发血';
     }
     
-    await connection.execute(
+    await connection.query(
       'UPDATE blood_requests SET issued_volume = ?, issued_units = ?, status = ? WHERE id = ?',
       [newIssuedVolume, newIssuedUnits, newStatus, id]
     );
@@ -333,7 +335,7 @@ router.post('/issue/:issueId/receive', async (req, res) => {
     const { issueId } = req.params;
     const { receiver } = req.body;
     
-    const [issue] = await connection.execute(
+    const [issue] = await connection.query(
       'SELECT * FROM blood_issues WHERE id = ?',
       [issueId]
     );
@@ -341,18 +343,18 @@ router.post('/issue/:issueId/receive', async (req, res) => {
       return res.status(404).json({ code: 404, message: '发血记录不存在' });
     }
     
-    const [issueItems] = await connection.execute(
+    const [issueItems] = await connection.query(
       'SELECT * FROM blood_issue_items WHERE issue_id = ?',
       [issueId]
     );
     
-    await connection.execute(
+    await connection.query(
       "UPDATE blood_issues SET status = '已接收', receiver = ? WHERE id = ?",
       [receiver || issue[0].receiver, issueId]
     );
     
     for (const item of issueItems) {
-      await connection.execute(
+      await connection.query(
         `INSERT INTO blood_tracking 
           (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
          VALUES (?, ?, '已接收', ?, ?, NOW(), '医院已接收血液')`,
@@ -380,7 +382,7 @@ router.post('/issue/:issueId/complete', async (req, res) => {
     const { issueId } = req.params;
     const { operator } = req.body;
     
-    const [issue] = await connection.execute(
+    const [issue] = await connection.query(
       'SELECT * FROM blood_issues WHERE id = ?',
       [issueId]
     );
@@ -388,23 +390,23 @@ router.post('/issue/:issueId/complete', async (req, res) => {
       return res.status(404).json({ code: 404, message: '发血记录不存在' });
     }
     
-    const [issueItems] = await connection.execute(
+    const [issueItems] = await connection.query(
       'SELECT * FROM blood_issue_items WHERE issue_id = ?',
       [issueId]
     );
     
-    await connection.execute(
+    await connection.query(
       "UPDATE blood_issues SET status = '已使用' WHERE id = ?",
       [issueId]
     );
     
     for (const item of issueItems) {
-      await connection.execute(
+      await connection.query(
         "UPDATE blood_units SET status = '已使用' WHERE id = ?",
         [item.blood_unit_id]
       );
       
-      await connection.execute(
+      await connection.query(
         `INSERT INTO blood_tracking 
           (blood_unit_id, blood_no, status, location, operator, operate_time, remark)
          VALUES (?, ?, '已输血', ?, ?, NOW(), '输血完成')`,
@@ -412,12 +414,12 @@ router.post('/issue/:issueId/complete', async (req, res) => {
       );
     }
     
-    const [request] = await connection.execute(
+    const [request] = await connection.query(
       'SELECT id, request_volume, issued_volume FROM blood_requests WHERE request_no = ?',
       [issue[0].request_no]
     );
     if (request.length > 0 && request[0].issued_volume >= request[0].request_volume) {
-      await connection.execute(
+      await connection.query(
         "UPDATE blood_requests SET status = '已完成' WHERE id = ?",
         [request[0].id]
       );
@@ -437,7 +439,7 @@ router.post('/issue/:issueId/complete', async (req, res) => {
 // 获取医院列表
 router.get('/hospitals/list', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await pool.query(
       'SELECT * FROM hospitals WHERE status = "正常" ORDER BY name'
     );
     res.json({ code: 200, message: '获取成功', data: rows });

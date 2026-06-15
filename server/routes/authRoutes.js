@@ -11,7 +11,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ code: 400, message: '请输入用户名和密码' });
     }
     
-    const [users] = await pool.execute(
+    const [users] = await pool.query(
       'SELECT * FROM sys_users WHERE username = ?',
       [username]
     );
@@ -32,7 +32,7 @@ router.post('/login', async (req, res) => {
     
     const token = generateToken(user);
     
-    await pool.execute(
+    await pool.query(
       'UPDATE sys_users SET last_login_time = NOW() WHERE id = ?',
       [user.id]
     );

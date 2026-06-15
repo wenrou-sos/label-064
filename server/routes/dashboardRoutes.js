@@ -5,58 +5,58 @@ const pool = require('../config/db');
 // 仪表盘统计数据
 router.get('/stats', async (req, res) => {
   try {
-    const [donorCount] = await pool.execute('SELECT COUNT(*) as count FROM donors');
+    const [donorCount] = await pool.query('SELECT COUNT(*) as count FROM donors');
     
-    const [todayCollection] = await pool.execute(
+    const [todayCollection] = await pool.query(
       `SELECT COUNT(*) as units, IFNULL(SUM(volume), 0) as volume 
        FROM blood_units WHERE collection_date = CURDATE()`
     );
     
-    const [pendingTests] = await pool.execute(
+    const [pendingTests] = await pool.query(
       "SELECT COUNT(*) as count FROM blood_units WHERE status IN ('待检测', '检测中')"
     );
     
-    const [inventoryStats] = await pool.execute(
+    const [inventoryStats] = await pool.query(
       `SELECT 
          COUNT(*) as total_units,
          IFNULL(SUM(volume), 0) as total_volume
        FROM inventory WHERE status = '在库'`
     );
     
-    const [bloodTypeStats] = await pool.execute(
+    const [bloodTypeStats] = await pool.query(
       `SELECT blood_type, COUNT(*) as units, IFNULL(SUM(volume), 0) as volume
        FROM inventory WHERE status = '在库'
        GROUP BY blood_type ORDER BY blood_type`
     );
     
-    const [componentStats] = await pool.execute(
+    const [componentStats] = await pool.query(
       `SELECT component_type, COUNT(*) as units, IFNULL(SUM(volume), 0) as volume
        FROM inventory WHERE status = '在库'
        GROUP BY component_type ORDER BY component_type`
     );
     
-    const [expire7Days] = await pool.execute(
+    const [expire7Days] = await pool.query(
       `SELECT COUNT(*) as count, IFNULL(SUM(volume), 0) as volume
        FROM inventory 
        WHERE status = '在库' AND expire_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)`
     );
     
-    const [expire3Days] = await pool.execute(
+    const [expire3Days] = await pool.query(
       `SELECT COUNT(*) as count, IFNULL(SUM(volume), 0) as volume
        FROM inventory 
        WHERE status = '在库' AND expire_date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)`
     );
     
-    const [pendingRequests] = await pool.execute(
+    const [pendingRequests] = await pool.query(
       "SELECT COUNT(*) as count FROM blood_requests WHERE status IN ('待审核', '已审核', '配血中', '部分发血')"
     );
     
-    const [todayIssues] = await pool.execute(
+    const [todayIssues] = await pool.query(
       `SELECT COUNT(*) as count, IFNULL(SUM(total_volume), 0) as volume
        FROM blood_issues WHERE DATE(issue_date) = CURDATE()`
     );
     
-    const [monthlyTrend] = await pool.execute(
+    const [monthlyTrend] = await pool.query(
       `SELECT 
          DATE_FORMAT(collection_date, '%Y-%m') as month,
          COUNT(*) as units,
@@ -67,12 +67,12 @@ router.get('/stats', async (req, res) => {
        ORDER BY month`
     );
     
-    const [recentRequests] = await pool.execute(
+    const [recentRequests] = await pool.query(
       `SELECT * FROM blood_requests 
        ORDER BY created_at DESC LIMIT 10`
     );
     
-    const [recentDonations] = await pool.execute(
+    const [recentDonations] = await pool.query(
       `SELECT * FROM blood_units 
        ORDER BY created_at DESC LIMIT 10`
     );
@@ -107,7 +107,7 @@ router.get('/track/:bloodNo', async (req, res) => {
   try {
     const { bloodNo } = req.params;
     
-    const [bloodUnit] = await pool.execute(
+    const [bloodUnit] = await pool.query(
       'SELECT * FROM blood_units WHERE blood_no = ?',
       [bloodNo]
     );
@@ -116,22 +116,22 @@ router.get('/track/:bloodNo', async (req, res) => {
       return res.status(404).json({ code: 404, message: '未找到该血液记录' });
     }
     
-    const [tracking] = await pool.execute(
+    const [tracking] = await pool.query(
       'SELECT * FROM blood_tracking WHERE blood_no = ? ORDER BY operate_time ASC',
       [bloodNo]
     );
     
-    const [testInfo] = await pool.execute(
+    const [testInfo] = await pool.query(
       'SELECT * FROM blood_tests WHERE blood_no = ? ORDER BY created_at DESC LIMIT 1',
       [bloodNo]
     );
     
-    const [inventoryInfo] = await pool.execute(
+    const [inventoryInfo] = await pool.query(
       'SELECT * FROM inventory WHERE blood_no = ?',
       [bloodNo]
     );
     
-    const [issueInfo] = await pool.execute(
+    const [issueInfo] = await pool.query(
       `SELECT bii.*, bi.issue_no, bi.hospital_name, bi.patient_name, bi.issue_date
        FROM blood_issue_items bii
        LEFT JOIN blood_issues bi ON bii.issue_id = bi.id
