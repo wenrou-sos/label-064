@@ -1,28 +1,58 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '../router'
+import { getToken, removeToken, removeUserInfo } from '../utils/auth'
 
 const service = axios.create({
   baseURL: '/api',
   timeout: 10000
 })
 
+service.interceptors.request.use(
+  config => {
+    const token = getToken()
+    if (token) {
+      config.headers['Authorization'] = 'Bearer ' + token
+    }
+    return config
+  },
+  error => {
+    console.error('请求错误:', error)
+    return Promise.reject(error)
+  }
+)
+
 service.interceptors.response.use(
   response => {
     const res = response.data
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
+      if (res.code === 401) {
+        removeToken()
+        removeUserInfo()
+        router.push('/login')
+      }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res.data
   },
   error => {
     console.error('请求错误:', error)
-    ElMessage.error(error.message || '网络错误')
+    if (error.response && error.response.status === 401) {
+      removeToken()
+      removeUserInfo()
+      router.push('/login')
+      ElMessage.error('登录已过期，请重新登录')
+    } else {
+      ElMessage.error(error.message || '网络错误')
+    }
     return Promise.reject(error)
   }
 )
 
 export const api = {
+  login: (data) => service.post('/auth/login', data),
+  logout: () => service.post('/auth/logout'),
   getDonors: (params) => service.get('/donors', { params }),
   getDonor: (id) => service.get(`/donors/${id}`),
   addDonor: (data) => service.post('/donors', data),

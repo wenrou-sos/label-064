@@ -28,10 +28,13 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { setToken, setUserInfo } from '../utils/auth'
+import { api } from '../api'
 
 const router = useRouter()
+const route = useRoute()
 const loginFormRef = ref(null)
 const loading = ref(false)
 
@@ -45,16 +48,22 @@ const rules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
-const handleLogin = () => {
-  loginFormRef.value.validate((valid) => {
+const handleLogin = async () => {
+  loginFormRef.value.validate(async (valid) => {
     if (valid) {
       loading.value = true
-      setTimeout(() => {
-        loading.value = false
-        localStorage.setItem('userInfo', JSON.stringify(loginForm.value))
+      try {
+        const res = await api.login(loginForm.value)
+        setToken(res.token)
+        setUserInfo(res.user)
         ElMessage.success('登录成功')
-        router.push('/dashboard')
-      }, 1000)
+        const redirect = route.query.redirect || '/dashboard'
+        router.push(redirect)
+      } catch (e) {
+        console.error(e)
+      } finally {
+        loading.value = false
+      }
     }
   })
 }

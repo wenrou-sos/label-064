@@ -78,7 +78,7 @@
           <el-dropdown @command="handleCommand">
             <span class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
-              <span class="username">管理员</span>
+              <span class="username">{{ userInfo.real_name || userInfo.username || '管理员' }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -103,18 +103,36 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { getUserInfo, removeToken, removeUserInfo } from '../utils/auth'
 
 const route = useRoute()
+const router = useRouter()
 const expireCount = ref(0)
+const userInfo = ref(getUserInfo() || {})
 
 const activeMenu = computed(() => route.path)
 const currentPageTitle = computed(() => route.meta.title || '首页')
 
 const handleCommand = (command) => {
   if (command === 'logout') {
-    window.location.href = '/login'
+    ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(async () => {
+      try {
+        await api.logout()
+      } catch (e) {
+        console.error(e)
+      }
+      removeToken()
+      removeUserInfo()
+      ElMessage.success('已退出登录')
+      router.push('/login')
+    }).catch(() => {})
   }
 }
 
